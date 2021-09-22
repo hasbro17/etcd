@@ -251,7 +251,7 @@ func (c *cluster) Launch(t testutil.TB) {
 	c.waitMembersMatch(t, c.HTTPMembers())
 	c.waitVersion()
 	for _, m := range c.Members {
-		t.Logf(" - %v -> %v (%v)", m.Name, m.ID(), m.GRPCAddr())
+		t.Logf(" - %v -> %v (%v)", m.Name, m.ID(), m.GRPCURL())
 	}
 }
 
@@ -575,7 +575,7 @@ type member struct {
 	grpcServerOpts []grpc.ServerOption
 	grpcServer     *grpc.Server
 	grpcServerPeer *grpc.Server
-	grpcAddr       string
+	grpcURL        string
 	grpcBridge     *bridge
 
 	// serverClient is a clientv3 that directly calls the etcdserver.
@@ -590,7 +590,7 @@ type member struct {
 	closed    bool
 }
 
-func (m *member) GRPCAddr() string { return m.grpcAddr }
+func (m *member) GRPCURL() string { return m.grpcURL }
 
 type memberConfig struct {
 	name                        string
@@ -737,28 +737,28 @@ func memberLogger(t testutil.TB, name string) *zap.Logger {
 // listenGRPC starts a grpc server over a unix domain socket on the member
 func (m *member) listenGRPC() error {
 	// prefix with localhost so cert has right domain
-	m.grpcAddr = "localhost:" + m.Name
-	m.Logger.Info("LISTEN GRPC", zap.String("m.grpcAddr", m.grpcAddr), zap.String("m.Name", m.Name))
+	m.grpcURL = "localhost:" + m.Name
+	m.Logger.Info("LISTEN GRPC", zap.String("m.grpcURL", m.grpcURL), zap.String("m.Name", m.Name))
 	if m.useIP { // for IP-only TLS certs
-		m.grpcAddr = "127.0.0.1:" + m.Name
+		m.grpcURL = "127.0.0.1:" + m.Name
 	}
-	grpcListener, err := transport.NewUnixListener(m.grpcAddr)
+	grpcListener, err := transport.NewUnixListener(m.grpcURL)
 	if err != nil {
-		return fmt.Errorf("listen failed on grpc socket %s (%v)", m.grpcAddr, err)
+		return fmt.Errorf("listen failed on grpc socket %s (%v)", m.grpcURL, err)
 	}
-	bridgeAddr := m.grpcAddr + "0"
+	bridgeAddr := m.grpcURL + "0"
 	bridgeListener, err := transport.NewUnixListener(bridgeAddr)
 	if err != nil {
 		grpcListener.Close()
-		return fmt.Errorf("listen failed on bridge socket %s (%v)", m.grpcAddr, err)
+		return fmt.Errorf("listen failed on bridge socket %s (%v)", m.grpcURL, err)
 	}
-	m.grpcBridge, err = newBridge(dialer{network: "unix", addr: m.grpcAddr}, bridgeListener)
+	m.grpcBridge, err = newBridge(dialer{network: "unix", addr: m.grpcURL}, bridgeListener)
 	if err != nil {
 		bridgeListener.Close()
 		grpcListener.Close()
 		return err
 	}
-	m.grpcAddr = schemeFromTLSInfo(m.ClientTLSInfo) + "://" + bridgeAddr
+	m.grpcURL = schemeFromTLSInfo(m.ClientTLSInfo) + "://" + bridgeAddr
 	m.grpcListener = grpcListener
 	return nil
 }
@@ -786,12 +786,12 @@ func (m *member) Unblackhole()        { m.grpcBridge.Unblackhole() }
 
 // NewClientV3 creates a new grpc client connection to the member
 func NewClientV3(m *member) (*clientv3.Client, error) {
-	if m.grpcAddr == "" {
+	if m.grpcURL == "" {
 		return nil, fmt.Errorf("member not configured for grpc")
 	}
 
 	cfg := clientv3.Config{
-		Endpoints:          []string{m.grpcAddr},
+		Endpoints:          []string{m.grpcURL},
 		DialTimeout:        5 * time.Second,
 		DialOptions:        []grpc.DialOption{grpc.WithBlock()},
 		MaxCallSendMsgSize: m.clientMaxCallSendMsgSize,
@@ -852,7 +852,7 @@ func (m *member) Launch() error {
 		zap.String("name", m.Name),
 		zap.Strings("advertise-peer-urls", m.PeerURLs.StringSlice()),
 		zap.Strings("listen-client-urls", m.ClientURLs.StringSlice()),
-		zap.String("grpc-address", m.grpcAddr),
+		zap.String("grpc-url", m.grpcURL),
 	)
 	var err error
 	if m.s, err = etcdserver.NewServer(m.ServerConfig); err != nil {
@@ -1009,7 +1009,7 @@ func (m *member) Launch() error {
 		zap.String("name", m.Name),
 		zap.Strings("advertise-peer-urls", m.PeerURLs.StringSlice()),
 		zap.Strings("listen-client-urls", m.ClientURLs.StringSlice()),
-		zap.String("grpc-address", m.grpcAddr),
+		zap.String("grpc-url", m.grpcURL),
 	)
 	return nil
 }
@@ -1122,7 +1122,7 @@ func (m *member) Stop(_ testutil.TB) {
 		zap.String("name", m.Name),
 		zap.Strings("advertise-peer-urls", m.PeerURLs.StringSlice()),
 		zap.Strings("listen-client-urls", m.ClientURLs.StringSlice()),
-		zap.String("grpc-address", m.grpcAddr),
+		zap.String("grpc-url", m.grpcURL),
 	)
 	m.Close()
 	m.serverClosers = nil
@@ -1131,7 +1131,7 @@ func (m *member) Stop(_ testutil.TB) {
 		zap.String("name", m.Name),
 		zap.Strings("advertise-peer-urls", m.PeerURLs.StringSlice()),
 		zap.Strings("listen-client-urls", m.ClientURLs.StringSlice()),
-		zap.String("grpc-address", m.grpcAddr),
+		zap.String("grpc-url", m.grpcURL),
 	)
 }
 
@@ -1156,7 +1156,7 @@ func (m *member) Restart(t testutil.TB) error {
 		zap.String("name", m.Name),
 		zap.Strings("advertise-peer-urls", m.PeerURLs.StringSlice()),
 		zap.Strings("listen-client-urls", m.ClientURLs.StringSlice()),
-		zap.String("grpc-address", m.grpcAddr),
+		zap.String("grpc-url", m.grpcURL),
 	)
 	newPeerListeners := make([]net.Listener, 0)
 	for _, ln := range m.PeerListeners {
@@ -1181,7 +1181,7 @@ func (m *member) Restart(t testutil.TB) error {
 		zap.String("name", m.Name),
 		zap.Strings("advertise-peer-urls", m.PeerURLs.StringSlice()),
 		zap.Strings("listen-client-urls", m.ClientURLs.StringSlice()),
-		zap.String("grpc-address", m.grpcAddr),
+		zap.String("grpc-url", m.grpcURL),
 		zap.Error(err),
 	)
 	return err
@@ -1194,7 +1194,7 @@ func (m *member) Terminate(t testutil.TB) {
 		zap.String("name", m.Name),
 		zap.Strings("advertise-peer-urls", m.PeerURLs.StringSlice()),
 		zap.Strings("listen-client-urls", m.ClientURLs.StringSlice()),
-		zap.String("grpc-address", m.grpcAddr),
+		zap.String("grpc-url", m.grpcURL),
 	)
 	m.Close()
 	if !m.keepDataDirTerminate {
@@ -1207,7 +1207,7 @@ func (m *member) Terminate(t testutil.TB) {
 		zap.String("name", m.Name),
 		zap.Strings("advertise-peer-urls", m.PeerURLs.StringSlice()),
 		zap.Strings("listen-client-urls", m.ClientURLs.StringSlice()),
-		zap.String("grpc-address", m.grpcAddr),
+		zap.String("grpc-url", m.grpcURL),
 	)
 }
 
