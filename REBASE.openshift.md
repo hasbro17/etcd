@@ -1,5 +1,7 @@
 # Maintaining openshift/etcd
 
+**Minor release base tag:** v3.7.3
+
 OpenShift is based on upstream etcd. With every release of etcd that is
 intended to be shipped as OCP, it is necessary to incorporate the upstream changes
 while ensuring that our downstream customizations are maintained.
